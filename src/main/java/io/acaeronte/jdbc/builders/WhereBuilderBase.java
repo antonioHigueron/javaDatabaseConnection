@@ -3,9 +3,11 @@ package io.acaeronte.jdbc.builders;
 import io.acaeronte.jdbc.common.Condition;
 import io.acaeronte.jdbc.common.Parameter;
 import io.acaeronte.jdbc.common.ParameterOperator;
+import io.acaeronte.jdbc.exception.JdbcException;
 import io.acaeronte.jdbc.mapper.annotations.Column;
 
 import java.lang.reflect.Field;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -125,13 +127,59 @@ public abstract class WhereBuilderBase extends BuilderBase {
     }
 
     private String generateListCondition(Parameter parameter) {
-        if (parameter.getValue() instanceof List){
-            List<Object> parameterList =
+        if (parameter.getValue() instanceof List) {
+            List<Object> parameterList = (List<Object>) parameter.getValue();
+            if (parameterList == null || parameterList.isEmpty()) {//  = ListUtils.isEmpty
+                this.logger.warn("Parameter of type [{}] with empty list ignored", new Object[]{parameter.getOperator().getValue()});
+                return "";
+            }
+            if (parameterList.size() == 1) {
+                parameter.setOperator(EQUALS);
+                parameter.setValue(parameterList.get(0));
+                return generateDefaultCondition(parameter);
+            }
+            StringBuilder sql = new StringBuilder();
+            sql.append("(");
+            sql.append(parameter.getColumn());
+            sql.append(" ").append(parameter.getOperator().getValue()).append(" (");
+            if (parameter.isLiteral()) {
+                if (checkLiteralColumn(parameter.getColumn())) {
+                    for (int i = 0; i < parameterList.size(); i++) {
+                        Object value = parameterList.get(i);
+                        checkDataTypeColumn(parameter.getColumn(), value);
+                        if (value.getClass().equals(Timestamp.class)) {
+                            StringBuilder timeValue = new StringBuilder(24);
+                            timeValue.append("'").append(value.toString()).append("'");
+                            sql.append(timeValue.toString());
+                        } else {
+                            sql.append(value);
+                        }
+                        if (i + 1 != parameterList.size()) {
+                            sql.append(",");
+                        }
+                    }
+                } else {
+                    throw new JdbcException("Literal parameter for column [" + parameter.getColumn() + "] not allowed");
+                }
+            } else {
+                for (int i = 0; i < parameterList.size(); i++) {
+                    Object value = parameterList.get(i);
+                    checkDataTypeColumn(parameter.getColumn(), value);
+                    sql.append(":" + parameter.getName() + i);
+                    this.valueMap.put(parameter.getName() + i, value);
+                    if (i + 1 != parameterList.size()) {
+                        sql.append(",");
+                    }
+                }
+            }
+            sql.append("))");
+            return sql.toString();
         }
-
-
+        parameter.setOperator(EQUALS);
+        return generateDefaultCondition(parameter);
     }
 
+    //TODO checkLiteralColumn method pending, line 193
 
 }
 
